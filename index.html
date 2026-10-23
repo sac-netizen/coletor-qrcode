@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Coletor de Atendimento</title>
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+  <style>
+    body { font-family: 'Segoe UI', Roboto, sans-serif; text-align: center; background: #f4f6f9; margin: 0; padding: 12px; }
+    .logo-container { margin: 5px auto 10px auto; min-height: 45px; display: flex; align-items: center; justify-content: center; }
+    .header-logo { max-width: 180px; max-height: 65px; object-fit: contain; }
+    h2 { color: #2c3e50; margin: 0 0 12px 0; font-size: 18px; font-weight: 600; }
+    .card-stepper { display: flex; justify-content: space-around; max-width: 380px; margin: 0 auto 12px auto; }
+    .step { padding: 6px 12px; font-size: 12px; border-radius: 12px; background: #e0e0e0; color: #666; font-weight: bold; transition: all 0.3s; }
+    .step.active { background: #007bff; color: #fff; box-shadow: 0 2px 4px rgba(0,123,255,0.3); }
+    .step.completed { background: #28a745; color: #fff; }
+    #scanner-container { width: 100%; max-width: 380px; margin: 0 auto; background: #fff; border-radius: 10px; padding: 10px; box-sizing: border-box; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+    #reader { width: 100%; border-radius: 6px; overflow: hidden; background: #111; min-height: 240px; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+    #reader__filescan_input, #reader a, #html5-qrcode-anchor-scan-type-change { display: none !important; }
+    .btn-main { background-color: #007bff; color: white; border: none; padding: 14px 22px; font-size: 15px; font-weight: bold; border-radius: 6px; cursor: pointer; width: 85%; margin: 10px 0; }
+    #status { margin: 10px auto; max-width: 380px; padding: 10px; font-weight: bold; border-radius: 6px; display: none; font-size: 13px; }
+    .success { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+    .error { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+    .info { background-color: #cce5ff; color: #004085; border: 1px solid #b8daff; }
+    .summary { max-width: 380px; margin: 10px auto; background: #fff; padding: 12px; border-radius: 8px; text-align: left; font-size: 13px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
+  </style>
+</head>
+<body>
+
+  <div class="logo-container">
+    <img src="COLOQUE_AQUI_O_LINK_DIRETO_DA_SUA_LOGO.png" id="img-logo" alt="Logo Clínica" class="header-logo" onerror="this.style.display='none'">
+  </div>
+
+  <h2>Coletor de Atendimento</h2>
+
+  <div class="card-stepper">
+    <span id="st-SALA" class="step active">1. Sala</span>
+    <span id="st-PACIENTE" class="step">2. Paciente</span>
+    <span id="st-PROFISSIONAL" class="step">3. Profissional</span>
+  </div>
+
+  <div id="scanner-container">
+    <div id="reader">
+      <button class="btn-main" onclick="iniciarCameraLivre()">📷 Ativar Câmera</button>
+    </div>
+  </div>
+
+  <div id="status"></div>
+
+  <div class="summary">
+    <div><strong>Sala:</strong> <span id="lbl-sala">Aguardando leitura...</span></div>
+    <div><strong>Paciente:</strong> <span id="lbl-paciente">Aguardando leitura...</span></div>
+    <div><strong>Profissional:</strong> <span id="lbl-profissional">Aguardando leitura...</span></div>
+  </div>
+
+  <script>
+    // COLE AQUI A URL GERADA NO DEPLOY DO GOOGLE APPS SCRIPT
+    const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzppcTFgjkkc9HjpT6Ce_sup3nOGoXbJubX1_GVgeia4x3rxYadevfoTOY1gbaiV2_3/exec";
+
+    let etapaAtual = 'SALA';
+    let dadosColetados = { sala: '', paciente: '', profissional: '' };
+    let isProcessing = false;
+    let html5QrCode = null;
+
+    function updateStepperUI() {
+      document.getElementById('st-SALA').className = 'step ' + (dadosColetados.sala ? 'completed' : (etapaAtual === 'SALA' ? 'active' : ''));
+      document.getElementById('st-PACIENTE').className = 'step ' + (dadosColetados.paciente ? 'completed' : (etapaAtual === 'PACIENTE' ? 'active' : ''));
+      document.getElementById('st-PROFISSIONAL').className = 'step ' + (dadosColetados.profissional ? 'completed' : (etapaAtual === 'PROFISSIONAL' ? 'active' : ''));
+      
+      document.getElementById('lbl-sala').innerText = dadosColetados.sala || 'Aguardando leitura...';
+      document.getElementById('lbl-paciente').innerText = dadosColetados.paciente || 'Aguardando leitura...';
+      document.getElementById('lbl-profissional').innerText = dadosColetados.profissional || 'Aguardando leitura...';
+    }
+
+    function iniciarCameraLivre() {
+      showStatus("Ativando câmera...", "info");
+      if (!html5QrCode) html5QrCode = new Html5Qrcode("reader");
+
+      html5QrCode.start(
+        { facingMode: "environment" },
+        { fps: 10, qrbox: { width: 220, height: 220 } },
+        onScanSuccess
+      ).then(() => {
+        showStatus("Câmera ativa. Posicione no QR Code da SALA.", "info");
+      }).catch(err => {
+        showStatus("❌ Erro ao abrir câmera. Verifique se deu permissão ao navegador.", "error");
+      });
+    }
+
+    function onScanSuccess(decodedText) {
+      if (isProcessing) return;
+      isProcessing = true;
+
+      decodedText = decodedText.trim();
+
+      // Validação Etapa 1: SALA
+      if (etapaAtual === 'SALA') {
+        if (!decodedText.startsWith("SALA+")) {
+          showStatus("❌ Código inválido! Esperado QR Code da SALA.", "error");
+          setTimeout(() => { isProcessing = false; }, 2000);
+          return;
+        }
+        dadosColetados.sala = decodedText;
+        etapaAtual = 'PACIENTE';
+        showStatus("✅ Sala registrada! Leia o QR Code do PACIENTE.", "success");
+        isProcessing = false;
+        updateStepperUI();
+        return;
+      }
+
+      // Validação Etapa 2: PACIENTE
+      if (etapaAtual === 'PACIENTE') {
+        if (!decodedText.startsWith("PAC+")) {
+          showStatus("❌ Código inválido! Esperado QR Code do PACIENTE.", "error");
+          setTimeout(() => { isProcessing = false; }, 2000);
+          return;
+        }
+
+        // Validação da Data do Paciente
+        let dataCodigo = decodedText.substring(4, 14); // dd-mm-aaaa
+        let hojeObj = new Date();
+        let dia = String(hojeObj.getDate()).padStart(2, '0');
+        let mes = String(hojeObj.getMonth() + 1).padStart(2, '0');
+        let ano = hojeObj.getFullYear();
+        let dataHoje = dia + "-" + mes + "-" + ano;
+
+        if (dataCodigo !== dataHoje) {
+          showStatus("❌ Data do paciente (" + dataCodigo + ") inválida! O código deve ser de hoje (" + dataHoje + ").", "error");
+          setTimeout(() => { isProcessing = false; }, 2500);
+          return;
+        }
+
+        dadosColetados.paciente = decodedText;
+        etapaAtual = 'PROFISSIONAL';
+        showStatus("✅ Paciente registrado! Leia o QR Code do PROFISSIONAL.", "success");
+        isProcessing = false;
+        updateStepperUI();
+        return;
+      }
+
+      // Validação Etapa 3: PROFISSIONAL
+      if (etapaAtual === 'PROFISSIONAL') {
+        if (!decodedText.startsWith("PROF+")) {
+          showStatus("❌ Código inválido! Esperado QR Code do PROFISSIONAL.", "error");
+          setTimeout(() => { isProcessing = false; }, 2000);
+          return;
+        }
+
+        dadosColetados.profissional = decodedText;
+        updateStepperUI();
+        showStatus("💾 Enviando dados para a planilha...", "info");
+
+        // Envia os 3 dados acumulados para a Planilha do Google
+        let urlEnvio = APPS_SCRIPT_URL + 
+          "?sala=" + encodeURIComponent(dadosColetados.sala) +
+          "&paciente=" + encodeURIComponent(dadosColetados.paciente) +
+          "&profissional=" + encodeURIComponent(dadosColetados.profissional);
+
+        fetch(urlEnvio)
+          .then(res => res.json())
+          .then(data => {
+            if (data.status === "success") {
+              showStatus("🎉 Atendimento registrado com sucesso!", "success");
+              setTimeout(resetarColeta, 2500);
+            } else {
+              showStatus("❌ Erro ao gravar: " + data.message, "error");
+              isProcessing = false;
+            }
+          })
+          .catch(err => {
+            showStatus("❌ Falha na conexão com a planilha.", "error");
+            isProcessing = false;
+          });
+      }
+    }
+
+    function resetarColeta() {
+      dadosColetados = { sala: '', paciente: '', profissional: '' };
+      etapaAtual = 'SALA';
+      isProcessing = false;
+      updateStepperUI();
+      showStatus("Pronto para novo atendimento. Posicione o foco na SALA.", "info");
+    }
+
+    function showStatus(text, className) {
+      const statusDiv = document.getElementById("status");
+      statusDiv.innerText = text;
+      statusDiv.className = className;
+      statusDiv.style.display = "block";
+    }
+
+    updateStepperUI();
+  </script>
+</body>
+</html>

@@ -3,32 +3,46 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Coletor de Atendimento</title>
+  <title>Check-in de Pacientes - Clinica Núcleo Alcance</title>
   <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
   <style>
     body { font-family: 'Segoe UI', Roboto, sans-serif; text-align: center; background: #f4f6f9; margin: 0; padding: 12px; }
+    
     .logo-container { margin: 5px auto 10px auto; min-height: 45px; display: flex; align-items: center; justify-content: center; }
     .header-logo { max-width: 180px; max-height: 65px; object-fit: contain; }
+    
     h2 { color: #2c3e50; margin: 0 0 12px 0; font-size: 18px; font-weight: 600; }
+    
     .card-stepper { display: flex; justify-content: space-around; max-width: 380px; margin: 0 auto 12px auto; }
     .step { padding: 6px 12px; font-size: 12px; border-radius: 12px; background: #e0e0e0; color: #666; font-weight: bold; transition: all 0.3s; }
     .step.active { background: #007bff; color: #fff; box-shadow: 0 2px 4px rgba(0,123,255,0.3); }
     .step.completed { background: #28a745; color: #fff; }
+    
     #scanner-container { width: 100%; max-width: 380px; margin: 0 auto; background: #fff; border-radius: 10px; padding: 10px; box-sizing: border-box; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
     #reader { width: 100%; border-radius: 6px; overflow: hidden; background: #111; min-height: 240px; display: flex; flex-direction: column; align-items: center; justify-content: center; }
     #reader__filescan_input, #reader a, #html5-qrcode-anchor-scan-type-change { display: none !important; }
+    
     .btn-main { background-color: #007bff; color: white; border: none; padding: 14px 22px; font-size: 15px; font-weight: bold; border-radius: 6px; cursor: pointer; width: 85%; margin: 10px 0; }
+    .btn-ok { background-color: #28a745; color: white; border: none; padding: 14px 28px; font-size: 16px; font-weight: bold; border-radius: 8px; cursor: pointer; width: 90%; margin-top: 15px; box-shadow: 0 4px 8px rgba(40,167,69,0.3); }
+    
     #status { margin: 10px auto; max-width: 380px; padding: 10px; font-weight: bold; border-radius: 6px; display: none; font-size: 13px; }
     .success { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
     .error { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
     .info { background-color: #cce5ff; color: #004085; border: 1px solid #b8daff; }
+    
+    /* Pop-up de Finalização do Atendimento */
+    #modal-sucesso { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); z-index: 999; justify-content: center; align-items: center; }
+    .modal-box { background: #fff; padding: 25px 20px; border-radius: 12px; width: 85%; max-width: 350px; text-align: center; box-shadow: 0 5px 15px rgba(0,0,0,0.3); }
+    .modal-box h3 { color: #28a745; margin-top: 0; font-size: 20px; }
+    
     .summary { max-width: 380px; margin: 10px auto; background: #fff; padding: 12px; border-radius: 8px; text-align: left; font-size: 13px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
   </style>
 </head>
 <body>
 
+  <!-- Substitua a URL abaixo pelo link direto da logo da clínica -->
   <div class="logo-container">
-    <img src="COLOQUE_AQUI_O_LINK_DIRETO_DA_SUA_LOGO.png" id="img-logo" alt="Logo Clínica" class="header-logo" onerror="this.style.display='none'">
+    <img src="https://lh3.googleusercontent.com/d/1rt8Ush7AU85iJHQatJyhcz7dx4TlLy11" id="img-logo" alt="Logo Clínica" class="header-logo" onerror="this.style.display='none'">
   </div>
 
   <h2>Coletor de Atendimento</h2>
@@ -53,14 +67,44 @@
     <div><strong>Profissional:</strong> <span id="lbl-profissional">Aguardando leitura...</span></div>
   </div>
 
+  <!-- POP-UP DE FINALIZAÇÃO DA CAPTURA -->
+  <div id="modal-sucesso">
+    <div class="modal-box">
+      <h3>🎉 Leitura Concluída!</h3>
+      <p style="color: #333; font-size: 14px; margin: 10px 0;">Atendimento registrado com sucesso na planilha.</p>
+      <button class="btn-ok" onclick="confirmarEProximo()">OK / Próximo Atendimento</button>
+    </div>
+  </div>
+
   <script>
-    // COLE AQUI A URL GERADA NO DEPLOY DO GOOGLE APPS SCRIPT
+    // URL gerada no deploy do Google Apps Script
     const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzppcTFgjkkc9HjpT6Ce_sup3nOGoXbJubX1_GVgeia4x3rxYadevfoTOY1gbaiV2_3/exec";
 
     let etapaAtual = 'SALA';
     let dadosColetados = { sala: '', paciente: '', profissional: '' };
     let isProcessing = false;
     let html5QrCode = null;
+
+    // Gerador de áudio do Bip via Web Audio API (sem precisar carregar arquivos de som externos)
+    function tocarBip() {
+      try {
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const oscillator = audioCtx.createOscillator();
+        const gainNode = audioCtx.createGain();
+
+        oscillator.type = 'sine';
+        oscillator.frequency.setValueAtTime(1000, audioCtx.currentTime); // Frequência do bip (1000Hz)
+        gainNode.gain.setValueAtTime(0.2, audioCtx.currentTime); // Volume
+
+        oscillator.connect(gainNode);
+        gainNode.connect(audioCtx.destination);
+
+        oscillator.start();
+        oscillator.stop(audioCtx.currentTime + 0.15); // Duração de 150ms
+      } catch (e) {
+        console.log("Áudio não suportado ou bloqueado.");
+      }
+    }
 
     function updateStepperUI() {
       document.getElementById('st-SALA').className = 'step ' + (dadosColetados.sala ? 'completed' : (etapaAtual === 'SALA' ? 'active' : ''));
@@ -83,7 +127,7 @@
       ).then(() => {
         showStatus("Câmera ativa. Posicione no QR Code da SALA.", "info");
       }).catch(err => {
-        showStatus("❌ Erro ao abrir câmera. Verifique se deu permissão ao navegador.", "error");
+        showStatus("❌ Erro ao abrir câmera. Verifique permissões.", "error");
       });
     }
 
@@ -100,11 +144,12 @@
           setTimeout(() => { isProcessing = false; }, 2000);
           return;
         }
+        tocarBip(); // Bip de confirmação
         dadosColetados.sala = decodedText;
         etapaAtual = 'PACIENTE';
         showStatus("✅ Sala registrada! Leia o QR Code do PACIENTE.", "success");
-        isProcessing = false;
         updateStepperUI();
+        setTimeout(() => { isProcessing = false; }, 1200);
         return;
       }
 
@@ -130,11 +175,12 @@
           return;
         }
 
+        tocarBip(); // Bip de confirmação
         dadosColetados.paciente = decodedText;
         etapaAtual = 'PROFISSIONAL';
         showStatus("✅ Paciente registrado! Leia o QR Code do PROFISSIONAL.", "success");
-        isProcessing = false;
         updateStepperUI();
+        setTimeout(() => { isProcessing = false; }, 1200);
         return;
       }
 
@@ -146,11 +192,12 @@
           return;
         }
 
+        tocarBip(); // Bip de confirmação
         dadosColetados.profissional = decodedText;
         updateStepperUI();
         showStatus("💾 Enviando dados para a planilha...", "info");
 
-        // Envia os 3 dados acumulados para a Planilha do Google
+        // Envia para o Google Sheets
         let urlEnvio = APPS_SCRIPT_URL + 
           "?sala=" + encodeURIComponent(dadosColetados.sala) +
           "&paciente=" + encodeURIComponent(dadosColetados.paciente) +
@@ -160,8 +207,8 @@
           .then(res => res.json())
           .then(data => {
             if (data.status === "success") {
-              showStatus("🎉 Atendimento registrado com sucesso!", "success");
-              setTimeout(resetarColeta, 2500);
+              // Exibe o Pop-up de confirmação com o botão OK
+              document.getElementById('modal-sucesso').style.display = 'flex';
             } else {
               showStatus("❌ Erro ao gravar: " + data.message, "error");
               isProcessing = false;
@@ -174,7 +221,9 @@
       }
     }
 
-    function resetarColeta() {
+    function confirmarEProximo() {
+      // Fecha o modal e reseta o fluxo para a próxima leitura
+      document.getElementById('modal-sucesso').style.display = 'none';
       dadosColetados = { sala: '', paciente: '', profissional: '' };
       etapaAtual = 'SALA';
       isProcessing = false;
